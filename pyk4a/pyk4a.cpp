@@ -2,6 +2,8 @@
 #include <numpy/arrayobject.h>
 
 #include <k4a/k4a.h>
+#include <k4abt.h>
+
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -15,14 +17,101 @@ extern "C" {
                                     {2048, 1536}, {3840, 2160},
                                     {4096, 3072}};
     k4a_capture_t capture;
+    k4a_calibration_t calibration;
     k4a_transformation_t transformation_handle;
     k4a_device_t device;
+    k4abt_tracker_t tracker;
+    k4abt_frame_t body_frame;
+
+    static PyObject* tracker_start(PyObject* self, PyObject* args){
+
+        //TODO: Move to config.py
+        k4abt_tracker_configuration_t tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
+        tracker_config.sensor_orientation = K4ABT_SENSOR_ORIENTATION_DEFAULT;
+        tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU;
+        tracker_config.gpu_device_id = 0;
+
+        k4a_result_t result = k4abt_tracker_create(&calibration, tracker_config, &tracker);
+        return Py_BuildValue("I", result);
+    }
+
+    static PyObject* tracker_stop(PyObject* self, PyObject* args){
+        k4abt_tracker_shutdown(tracker);
+        k4abt_tracker_destroy(tracker);
+        return Py_BuildValue("I", K4A_RESULT_SUCCEEDED);
+    }
+
+
+    static PyObject* tracker_get_body_frame(PyObject* self, PyObject* args){
+        // Capture needs to already be filled priot to calling this method.
+        // We do this to avoid calling capture twice which adds latency
+
+        k4a_wait_result_t queue_capture_result = k4abt_tracker_enqueue_capture(tracker, capture, K4A_WAIT_INFINITE);
+
+        if (queue_capture_result == K4A_WAIT_RESULT_TIMEOUT){
+            return Py_BuildValue("I", K4A_WAIT_RESULT_TIMEOUT);
+        }
+        else if (queue_capture_result == K4A_WAIT_RESULT_FAILED){
+            return Py_BuildValue("I", K4A_WAIT_RESULT_FAILED);
+        }
+
+        if (body_frame) k4abt_frame_release(body_frame);
+
+        k4a_wait_result_t pop_frame_result = k4abt_tracker_pop_result(tracker, &body_frame, K4A_WAIT_INFINITE);
+        return Py_BuildValue("I", pop_frame_result);
+    }
+
+    static PyObject* frame_get_num_bodies(PyObject* self, PyObject* args){
+        size_t num_bodies = k4abt_frame_get_num_bodies(body_frame);
+        return Py_BuildValue("I", num_bodies);
+    }
+
+    static PyObject* frame_get_body_skeleton(PyObject* self, PyObject* args){
+        int body_id;
+        PyArg_ParseTuple(args, "I", &body_id);
+
+        // TODO: ERROR CHECKING
+        k4abt_body_t body;
+        k4a_result_t result = k4abt_frame_get_body_skeleton(body_frame, body_id, &body.skeleton);
+        body.id = k4abt_frame_get_body_id(body_frame, body_id);
+
+        PyObject *skel = PyList_New(static_cast<int>(K4ABT_JOINT_COUNT));
+
+        for (int joint = 0; joint < static_cast<int>(K4ABT_JOINT_COUNT); joint++)
+        {
+            const k4a_float3_t& jointPosition = body.skeleton.joints[joint].position;
+            const k4a_quaternion_t& jointOrientation = body.skeleton.joints[joint].orientation;
+
+            PyObject *body_dict = PyDict_New();
+            PyObject *position = PyList_New(3);
+            PyObject *rotation = PyList_New(4);
+
+            // Set positions vector (x,y,z)
+            PyList_SetItem (position, 0, PyFloat_FromDouble(jointPosition.v[0]));
+            PyList_SetItem (position, 1, PyFloat_FromDouble(jointPosition.v[1]));
+            PyList_SetItem (position, 2, PyFloat_FromDouble(jointPosition.v[2]));
+
+            // Set rotations *quaternion (w,x,y,z)
+            PyList_SetItem (rotation, 0, PyFloat_FromDouble(jointOrientation.v[0]));
+            PyList_SetItem (rotation, 1, PyFloat_FromDouble(jointOrientation.v[1]));
+            PyList_SetItem (rotation, 2, PyFloat_FromDouble(jointOrientation.v[2]));
+            PyList_SetItem (rotation, 3, PyFloat_FromDouble(jointOrientation.v[3]));
+
+            // Set as items in dict
+            PyDict_SetItem(body_dict, PyUnicode_FromString("position"),position);
+            PyDict_SetItem(body_dict, PyUnicode_FromString("rotation"),rotation);
+
+            // Add to list of joints
+            PyList_SetItem (skel, joint, body_dict);
+        }
+
+        return skel;
+    }
 
     static PyObject* device_open(PyObject* self, PyObject* args){
         int device_id;
         PyArg_ParseTuple(args, "I", &device_id);
         k4a_result_t result = k4a_device_open(device_id, &device);
-
         return Py_BuildValue("I", result);
     }
 
@@ -93,7 +182,6 @@ extern "C" {
                 &config.disable_streaming_indicator);
 
         k4a_result_t result;
-        k4a_calibration_t calibration;
         result = k4a_device_get_calibration(device, config.depth_mode,
                 config.color_resolution, &calibration);
         if (result == K4A_RESULT_FAILED) {
@@ -334,6 +422,11 @@ extern "C" {
         {"device_get_calibration", device_get_calibration, METH_VARARGS, "Get device calibration in json format."},
         {"calibration_set_from_raw", calibration_set_from_raw, METH_VARARGS, "Temporary set the calibration from a json format. Must be called after device_start_cameras."},
         {"transformation_depth_image_to_color_camera", transformation_depth_image_to_color_camera, METH_VARARGS, "Transforms the depth map into the geometry of the color camera."},
+        {"tracker_start", tracker_start, METH_VARARGS, "Start the Azure Kinect Body Tracker"},
+        {"tracker_stop", tracker_stop, METH_VARARGS, "Stop the Azure Kinect Body Tracker"},
+        {"tracker_get_body_frame", tracker_get_body_frame, METH_VARARGS, "Captures a body frame."},
+        {"frame_get_num_bodies", frame_get_num_bodies, METH_VARARGS, "Get the number of bodies in the captured body frame."},
+        {"frame_get_body_skeleton", frame_get_body_skeleton, METH_VARARGS, "Get the skeleton of a body with some id."},
         {NULL, NULL, 0, NULL}
     };
 

@@ -28,6 +28,7 @@ class PyK4A:
         self._device_id = device_id
         self._config = config
         self.is_running = False
+        self.is_tracking = False
 
     def __del__(self):
         if self.is_running:
@@ -42,6 +43,16 @@ class PyK4A:
         self._stop_cameras()
         self._device_close()
         self.is_running = False
+
+    def tracker_start(self):
+        res = k4a_module.tracker_start()
+        self.is_tracking = True
+        self._verify_error(res)
+
+    def tracker_stop(self):
+        res = k4a_module.tracker_stop()
+        self.is_tracking = False
+        self._verify_error(res)
 
     def save_calibration_json(self, path):
         calibration = k4a_module.device_get_calibration()
@@ -69,6 +80,21 @@ class PyK4A:
     def _stop_cameras(self):
         res = k4a_module.device_stop_cameras()
         self._verify_error(res)
+
+    def get_body_frame(self, timeout=TIMEOUT_WAIT_INFINITE):
+        res = k4a_module.device_get_capture(timeout)
+        self._verify_error(res)
+        res = k4a_module.tracker_get_body_frame()
+        self._verify_error(res)
+
+    def get_num_bodies(self):
+        num_bodies = k4a_module.frame_get_num_bodies()
+        return num_bodies
+
+    def get_skeleton(self, body_id):
+        skeleton = k4a_module.frame_get_body_skeleton(body_id)
+        return skeleton
+
 
     def get_capture(self, timeout=TIMEOUT_WAIT_INFINITE, color_only=False, transform_depth_to_color=True):
         r"""Fetch a capture from the device and return as numpy array(s) or None.
@@ -100,6 +126,7 @@ class PyK4A:
         else:
             depth = self._get_capture_depth(transform_depth_to_color)
             return color, depth
+
 
     def _get_capture_color(self) -> Optional[np.ndarray]:
         return k4a_module.device_get_color_image()
