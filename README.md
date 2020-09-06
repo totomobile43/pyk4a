@@ -8,6 +8,7 @@ Images are returned as numpy arrays and behave like python objects.
 This approach incurs almost no overhead in terms of CPU, memory or other resources.
 It also simplifies usage. Kinect C api image buffers are directly reused and image releases are performed automatically by the python garbage collector.
 
+The library now also supports the body tracking SDK.
 
 ## Prerequisites
 The [Azure-Kinect-Sensor-SDK](https://github.com/microsoft/Azure-Kinect-Sensor-SDK) is required to build this library.
@@ -27,9 +28,15 @@ pip install pyk4a
 ### Windows
 
 Make sure you replace the paths in the following instructions with your own k4a sdk path.
+Notice that there are paths to both the sensor SDK and the body tracking SDK.
 
 ```
-pip install pyk4a --global-option=build_ext --global-option="-IC:\Program Files\Azure Kinect SDK v1.2.0\sdk\include" --global-option="-LC:\Program Files\Azure Kinect SDK v1.2.0\sdk\windows-desktop\amd64\release\lib"
+pip install pyk4a  --global-option=build_ext --global-option="-IC:\Program Files\Azure Kinect SDK v1.4.1\sdk\include;C:\Program Files\Azure Kinect Body Tracking SDK\sdk\include" --global-option="-LC:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\lib;C:\Program Files\Azure Kinect Body Tracking SDK\sdk\windows-desktop\amd64\release\lib""
+```
+
+To use this repo directly and work locally (so you can edit the API freely) use:
+```
+pip install -e . [global options]
 ```
 
 Don't forget to add the folder containing the release `k4a.dll` to your Path env variable `C:\Program Files\Azure Kinect SDK v1.2.0\sdk\windows-desktop\amd64\release\bin`
