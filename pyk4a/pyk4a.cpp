@@ -43,7 +43,7 @@ extern "C" {
 
 
     static PyObject* tracker_get_body_frame(PyObject* self, PyObject* args){
-        // Capture needs to already be filled priot to calling this method.
+        // Capture needs to already be filled prior to calling this method.
         // We do this to avoid calling capture twice which adds latency
 
         k4a_wait_result_t queue_capture_result = k4abt_tracker_enqueue_capture(tracker, capture, K4A_WAIT_INFINITE);
@@ -286,6 +286,23 @@ extern "C" {
         return K4A_RESULT_SUCCEEDED;
     }
 
+
+    k4a_result_t k4a_xyz_to_numpy(k4a_image_t* xyz_src, PyArrayObject** img_dst){
+        uint8_t* buffer = k4a_image_get_buffer(*xyz_src);
+        npy_intp dims[3];
+        dims[0] = k4a_image_get_height_pixels(*xyz_src);
+        dims[1] = k4a_image_get_width_pixels(*xyz_src);
+        dims[2] = 3;
+
+        *img_dst = (PyArrayObject*) PyArray_SimpleNewFromData(3, dims, NPY_UINT16, buffer);
+
+        PyObject *capsule = PyCapsule_New(buffer, NULL, capsule_cleanup);
+        PyCapsule_SetContext(capsule, xyz_src);
+        PyArray_SetBaseObject((PyArrayObject *) *img_dst, capsule);
+
+        return K4A_RESULT_SUCCEEDED;
+    }
+
     k4a_result_t numpy_to_k4a_image(PyArrayObject* img_src, k4a_image_t* img_dst,
             k4a_image_format_t format){
 
@@ -296,6 +313,9 @@ extern "C" {
         switch (format){
             case K4A_IMAGE_FORMAT_DEPTH16:
                 pixel_size = (int)sizeof(uint16_t);
+                break;
+            case K4A_IMAGE_FORMAT_COLOR_BGRA32:
+                pixel_size = (int)sizeof(uint32_t);
                 break;
             default:
                 // Not supported
@@ -311,8 +331,7 @@ extern "C" {
                 NULL, NULL, img_dst);
     }
 
-    static PyObject* transformation_depth_image_to_color_camera(
-            PyObject* self, PyObject* args){
+    static PyObject* transformation_depth_image_to_color_camera(PyObject* self, PyObject* args){
         k4a_result_t res;
         PyArrayObject *in_array;
         k4a_color_resolution_t color_resolution;
@@ -349,6 +368,109 @@ extern "C" {
         }
         else {
             free(depth_image_transformed);
+            return Py_BuildValue("");
+        }
+    }
+
+    static PyObject* transformation_color_image_to_depth_camera(PyObject* self, PyObject* args){
+        k4a_result_t res;
+        PyArrayObject *in_depth_array;
+        PyArrayObject *in_color_array;
+        PyArg_ParseTuple(args, "O!O!", &PyArray_Type, &in_depth_array, &PyArray_Type, &in_color_array);
+
+        k4a_image_t* transformed_color_image = (k4a_image_t*) malloc(sizeof(k4a_image_t));
+
+        k4a_image_t depth_image;
+        k4a_image_t color_image;
+        res = numpy_to_k4a_image(in_depth_array, &depth_image, K4A_IMAGE_FORMAT_DEPTH16);
+        if (K4A_RESULT_SUCCEEDED == res) {
+            res = numpy_to_k4a_image(in_color_array, &color_image, K4A_IMAGE_FORMAT_COLOR_BGRA32);
+            if (K4A_RESULT_SUCCEEDED == res) {
+                res = k4a_image_create(
+                        K4A_IMAGE_FORMAT_COLOR_BGRA32,
+                        k4a_image_get_width_pixels(depth_image),
+                        k4a_image_get_height_pixels(depth_image),
+                        k4a_image_get_width_pixels(depth_image) * (int) sizeof(uint32_t),
+                        transformed_color_image);
+            }
+        }
+
+        if (K4A_RESULT_SUCCEEDED == res) {
+            res = k4a_transformation_color_image_to_depth_camera(
+                    transformation_handle,
+                    depth_image, color_image, *transformed_color_image);
+            k4a_image_release(depth_image);
+            k4a_image_release(color_image);
+        }
+
+        PyArrayObject* np_color_image;
+        if (K4A_RESULT_SUCCEEDED == res) {
+            res = k4a_image_to_numpy(transformed_color_image, &np_color_image);
+        }
+
+        if (K4A_RESULT_SUCCEEDED == res) {
+            return PyArray_Return(np_color_image);
+        }
+        else {
+            free(transformed_color_image);
+            return Py_BuildValue("");
+        }
+    }
+
+
+    static PyObject* transformation_depth_image_to_point_cloud(PyObject* self, PyObject* args) {
+        PyThreadState *thread_state;
+        k4a_result_t res;
+
+        PyArrayObject *depth_in_array;
+        bool calibration_type_color;
+        PyArg_ParseTuple(args, "O!p", &PyArray_Type, &depth_in_array, &calibration_type_color);
+
+        k4a_calibration_type_t camera;
+        if (calibration_type_color) {
+            camera = K4A_CALIBRATION_TYPE_COLOR;
+        } else {
+            camera = K4A_CALIBRATION_TYPE_DEPTH;
+        }
+        k4a_image_t* xyz_image = (k4a_image_t *) malloc(sizeof(k4a_image_t));
+
+        k4a_image_t depth_image;
+        res = numpy_to_k4a_image(depth_in_array, &depth_image, K4A_IMAGE_FORMAT_DEPTH16);
+
+        if (K4A_RESULT_SUCCEEDED == res) {
+            res = k4a_image_create(
+                    K4A_IMAGE_FORMAT_CUSTOM,
+                    k4a_image_get_width_pixels(depth_image),
+                    k4a_image_get_height_pixels(depth_image),
+                    k4a_image_get_width_pixels(depth_image) * 3 * (int) sizeof(int16_t),
+                    xyz_image);
+        }
+
+
+
+        if (K4A_RESULT_SUCCEEDED == res) {
+
+//            printf("format %d", camera);
+//            printf("width %d", k4a_image_get_width_pixels(depth_image));
+//            printf("height %d", k4a_image_get_height_pixels(depth_image));
+
+            res = k4a_transformation_depth_image_to_point_cloud(
+                    transformation_handle,
+                    depth_image,
+                    camera,
+                    *xyz_image);
+            k4a_image_release(depth_image);
+        }
+
+        PyArrayObject* np_xyz_image;
+        if (K4A_RESULT_SUCCEEDED == res) {
+            res = k4a_xyz_to_numpy(xyz_image, &np_xyz_image);
+        }
+
+        if (K4A_RESULT_SUCCEEDED == res) {
+            return PyArray_Return(np_xyz_image);
+        } else {
+            free(xyz_image);
             return Py_BuildValue("");
         }
     }
@@ -422,6 +544,8 @@ extern "C" {
         {"device_get_calibration", device_get_calibration, METH_VARARGS, "Get device calibration in json format."},
         {"calibration_set_from_raw", calibration_set_from_raw, METH_VARARGS, "Temporary set the calibration from a json format. Must be called after device_start_cameras."},
         {"transformation_depth_image_to_color_camera", transformation_depth_image_to_color_camera, METH_VARARGS, "Transforms the depth map into the geometry of the color camera."},
+        {"transformation_depth_image_to_point_cloud", transformation_depth_image_to_point_cloud, METH_VARARGS, "Transforms the depth map to a point cloud."},
+        {"transformation_color_image_to_depth_camera", transformation_color_image_to_depth_camera, METH_VARARGS, "Transforms the color image into depth camera space."},
         {"tracker_start", tracker_start, METH_VARARGS, "Start the Azure Kinect Body Tracker"},
         {"tracker_stop", tracker_stop, METH_VARARGS, "Stop the Azure Kinect Body Tracker"},
         {"tracker_get_body_frame", tracker_get_body_frame, METH_VARARGS, "Captures a body frame."},

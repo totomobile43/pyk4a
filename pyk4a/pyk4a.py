@@ -82,8 +82,6 @@ class PyK4A:
         self._verify_error(res)
 
     def get_body_frame(self, timeout=TIMEOUT_WAIT_INFINITE):
-        res = k4a_module.device_get_capture(timeout)
-        self._verify_error(res)
         res = k4a_module.tracker_get_body_frame()
         self._verify_error(res)
 
@@ -96,7 +94,7 @@ class PyK4A:
         return skeleton
 
 
-    def get_capture(self, timeout=TIMEOUT_WAIT_INFINITE, color_only=False, transform_depth_to_color=True):
+    def get_capture(self, timeout=TIMEOUT_WAIT_INFINITE, transform_depth_to_color=True):
         r"""Fetch a capture from the device and return as numpy array(s) or None.
 
         Arguments:
@@ -120,13 +118,18 @@ class PyK4A:
         res = k4a_module.device_get_capture(timeout)
         self._verify_error(res)
 
+        depth = self._get_capture_depth(transform_depth_to_color)
         color = self._get_capture_color()
-        if color_only:
-            return color
-        else:
-            depth = self._get_capture_depth(transform_depth_to_color)
-            return color, depth
+        pcl = self._get_point_cloud(depth, transform_depth_to_color)
 
+        if not transform_depth_to_color:
+            color = self._transform_color(depth, color)
+
+        return color, depth, pcl
+
+    def _get_point_cloud(self, depth, transform_depth_to_color: bool):
+        pcl = k4a_module.transformation_depth_image_to_point_cloud(depth, transform_depth_to_color)
+        return pcl
 
     def _get_capture_color(self) -> Optional[np.ndarray]:
         return k4a_module.device_get_color_image()
@@ -136,6 +139,10 @@ class PyK4A:
         if transform_depth_to_color:
             depth = k4a_module.transformation_depth_image_to_color_camera(depth, self._config.color_resolution)
         return depth
+
+    def _transform_color(self, depth, color):
+        self._transformed_color = k4a_module.transformation_color_image_to_depth_camera(depth, color)
+        return self._transformed_color
 
     @property
     def sync_jack_status(self) -> Tuple[bool, bool]:
