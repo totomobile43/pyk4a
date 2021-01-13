@@ -93,8 +93,11 @@ class PyK4A:
         skeleton = k4a_module.frame_get_body_skeleton(body_id)
         return skeleton
 
+    def trigger_capture(self, timeout=TIMEOUT_WAIT_INFINITE):
+        res = k4a_module.device_get_capture(timeout)
+        self._verify_error(res)
 
-    def get_capture(self, timeout=TIMEOUT_WAIT_INFINITE, transform_depth_to_color=True):
+    def get_capture(self,  transform_depth_to_color=True):
         r"""Fetch a capture from the device and return as numpy array(s) or None.
 
         Arguments:
@@ -115,8 +118,7 @@ class PyK4A:
                 >>> k4a.get_capture() # type: Tuple[Optional[np.ndarray], Optional[np.ndarray]]
         """
 
-        res = k4a_module.device_get_capture(timeout)
-        self._verify_error(res)
+
 
         depth = self._get_capture_depth(transform_depth_to_color)
         color = self._get_capture_color()

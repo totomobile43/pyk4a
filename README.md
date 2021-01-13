@@ -39,7 +39,12 @@ To use this repo directly and work locally (so you can edit the API freely) use:
 pip install -e . [global options]
 ```
 
-Don't forget to add the folder containing the release `k4a.dll` to your Path env variable `C:\Program Files\Azure Kinect SDK v1.2.0\sdk\windows-desktop\amd64\release\bin`
+Don't forget to add the folder containing the release `k4a.dll` to your Path env variable 
+`C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\bin`
+
+You also need to add the path to the CUDA DLLs. If you install CUDA from NVIDIA, they may already be in your path. If not, since the body-tracking SDK already ships with these, you can add the following to your path:
+`C:\Program Files\Azure Kinect SDK v1.4.1\tools`
+
 
 ## Example
 
